@@ -1,18 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { LandingReferenceAnalysis, LandingRun, SectionSpec } from "@/lib/schema";
-import { LandingRenderer } from "@/components/LandingRenderer";
+import { useCallback, useState } from "react";
+import type { VerificationResult, DesignRetentionResult, ViewportScore } from "@/lib/clone-types";
 
-type Tab = "preview" | "json" | "controls";
-type HistoryItem = { id: number; kind: string; payload: unknown; createdAt: string };
+type Stage = "input" | "clone" | "analyze" | "customize";
 
-const STEPS = ["입력", "캡처", "분석", "커스터마이징", "생성"] as const;
+interface EditableField {
+  id: string;
+  kind?: string;
+  type?: string;
+  currentValue?: string;
+  selector?: string;
+  styleLocked?: boolean;
+  layoutLocked?: boolean;
+}
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+async function api<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    method: body ? "POST" : "GET",
+    headers: { "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
   const json = text ? JSON.parse(text) : {};
@@ -20,385 +27,267 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return json as T;
 }
 
-export default function Page() {
-  const [runs, setRuns] = useState<LandingRun[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<LandingReferenceAnalysis | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [url, setUrl] = useState("https://stripe.com");
-  const [goal, setGoal] = useState("AI 강의 랜딩");
-  const [composer, setComposer] = useState("");
-  const [tab, setTab] = useState<Tab>("preview");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [stepIdx, setStepIdx] = useState(0);
-  const [log, setLog] = useState<string[]>([]);
-  const [dirty, setDirty] = useState(false);
-  const [generated, setGenerated] = useState<{ previewUrl: string; codePath: string } | null>(null);
+function pct(n: number): string {
+  return `${(Math.max(0, Math.min(1, n)) * 100).toFixed(1)}%`;
+}
 
-  const activeRun = useMemo(() => runs.find((r) => r.id === activeId) ?? null, [runs, activeId]);
-  const addLog = useCallback((m: string) => setLog((l) => [...l.slice(-40), m]), []);
-
-  const loadRuns = useCallback(async () => {
-    try {
-      const { runs } = await api<{ runs: LandingRun[] }>("/api/runs");
-      setRuns(runs);
-    } catch (e) {
-      addLog(`runs 로드 실패: ${(e as Error).message}`);
-    }
-  }, [addLog]);
-
-  useEffect(() => {
-    void loadRuns();
-  }, [loadRuns]);
-
-  const openRun = useCallback(
-    async (id: string) => {
-      setActiveId(id);
-      setGenerated(null);
-      setDirty(false);
-      try {
-        const data = await api<{ run: LandingRun; analysis: LandingReferenceAnalysis | null; history: HistoryItem[] }>(`/api/runs/${id}`);
-        setAnalysis(data.analysis);
-        setHistory(data.history ?? []);
-        setStepIdx(data.analysis ? 3 : 1);
-        addLog(`run ${id} 로드 (${data.analysis ? "분석 있음" : "분석 없음"})`);
-      } catch (e) {
-        addLog(`run 로드 실패: ${(e as Error).message}`);
-      }
-    },
-    [addLog],
+function ScoreTable({ label, s }: { label: string; s: ViewportScore }) {
+  const visual = (s.pixelSimilarity + s.ssim) / 2;
+  return (
+    <div className="card" style={{ flex: 1 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <strong>{label}</strong>
+        <span className="pill" style={{ borderColor: s.passed ? "var(--ok)" : "var(--err)", color: s.passed ? "var(--ok)" : "var(--err)" }}>
+          {s.passed ? "통과" : "실패"}
+        </span>
+      </div>
+      <div style={{ fontSize: 13, color: "var(--muted)", display: "grid", gridTemplateColumns: "1fr auto", rowGap: 4 }}>
+        <span>시각 (pixel+ssim)/2</span><b style={{ color: visual >= 0.9 ? "var(--ok)" : "var(--err)" }}>{pct(visual)}</b>
+        <span>pixel</span><span>{pct(s.pixelSimilarity)}</span>
+        <span>ssim</span><span>{pct(s.ssim)}</span>
+        <span>layout (IoU)</span><span>{pct(s.layoutSimilarity)}</span>
+        <span>palette</span><span>{pct(s.paletteSimilarity)}</span>
+      </div>
+    </div>
   );
+}
 
-  const newRunForm = useCallback(() => {
-    setActiveId(null);
-    setAnalysis(null);
-    setHistory([]);
-    setGenerated(null);
-    setStepIdx(0);
-  }, []);
+export default function Page() {
+  const [stage, setStage] = useState<Stage>("input");
+  const [url, setUrl] = useState("/fixture/index.html");
+  const [captureId, setCaptureId] = useState<string | null>(null);
+  const [verification, setVerification] = useState<VerificationResult | null>(null);
+  const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null);
+  const [fields, setFields] = useState<EditableField[]>([]);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [retention, setRetention] = useState<DesignRetentionResult | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [log, setLog] = useState<string[]>([]);
 
-  // 입력 → 생성 파이프라인: create → capture → analyze
+  const addLog = useCallback((m: string) => setLog((l) => [...l.slice(-30), m]), []);
+  const absUrl = useCallback((u: string) => (u.startsWith("http") ? u : `${location.origin}${u.startsWith("/") ? "" : "/"}${u}`), []);
+
+  const runClone = useCallback(async () => {
+    try {
+      setBusy("캡처 → 에셋 mirror → clone 생성 → 재캡처 → 시각 비교 중… (수십 초)");
+      setVerification(null);
+      setAnalysis(null);
+      setRetention(null);
+      const target = absUrl(url.trim());
+      const data = await api<{ captureId: string; verification: VerificationResult }>("/api/clone", { url: target });
+      setCaptureId(data.captureId);
+      setVerification(data.verification);
+      setStage("clone");
+      addLog(`clone ${data.verification.overallPassed ? "통과 ✓" : "실패 ✗"} — D ${pct((data.verification.desktop.pixelSimilarity + data.verification.desktop.ssim) / 2)} / M ${pct((data.verification.mobile.pixelSimilarity + data.verification.mobile.ssim) / 2)}`);
+    } catch (e) {
+      addLog(`clone 실패: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [url, absUrl, addLog]);
+
   const runAnalyze = useCallback(async () => {
-    if (!url.trim()) {
-      addLog("URL 을 입력하세요.");
-      return;
-    }
+    if (!captureId) return;
     try {
-      setBusy("run 생성 중…");
-      setStepIdx(0);
-      const { run } = await api<{ run: LandingRun }>("/api/runs", {
-        method: "POST",
-        body: JSON.stringify({ referenceUrl: url.trim(), userGoal: goal.trim() }),
-      });
-      setActiveId(run.id);
-      await loadRuns();
-
-      setBusy("레퍼런스 캡처 중…");
-      setStepIdx(1);
-      const cap = await api<{ ok: boolean; fallback: boolean; summary: string }>("/api/capture", {
-        method: "POST",
-        body: JSON.stringify({ runId: run.id }),
-      });
-      addLog(`캡처 ${cap.fallback ? "(폴백)" : "성공"}: ${cap.summary}`);
-
-      setBusy("디자인/구조 분석 중…");
-      setStepIdx(2);
-      const ana = await api<{ analysis: LandingReferenceAnalysis; mode: string }>("/api/analyze", {
-        method: "POST",
-        body: JSON.stringify({ runId: run.id }),
-      });
-      setAnalysis(ana.analysis);
-      setStepIdx(3);
-      addLog(`분석 완료 (${ana.mode}) — 섹션 ${ana.analysis.structure.sections.length}개`);
-      await loadRuns();
-      void openRun(run.id);
+      setBusy("clone 아티팩트 분석 중…");
+      const data = await api<Record<string, unknown>>("/api/clone-analyze", { captureId });
+      setAnalysis(data);
+      const schema = (data.customizableSchema ?? data["customizable-schema"] ?? data.schema) as
+        | { editableFields?: EditableField[] }
+        | undefined;
+      const ef = schema?.editableFields ?? [];
+      setFields(ef);
+      setEdits(Object.fromEntries(ef.filter((f) => (f.kind ?? f.type) === "text" || (f.kind ?? f.type) === "cta").map((f) => [f.id, f.currentValue ?? ""])));
+      setStage("analyze");
+      addLog(`분석 완료 — editable ${ef.length}개`);
     } catch (e) {
-      addLog(`분석 실패: ${(e as Error).message}`);
+      addLog(`분석 실패(가드레일 차단 가능): ${(e as Error).message}`);
     } finally {
       setBusy(null);
     }
-  }, [url, goal, addLog, loadRuns, openRun]);
+  }, [captureId, addLog]);
 
-  // 자연어 커스터마이징 → patch
-  const sendComposer = useCallback(async () => {
-    const instruction = composer.trim();
-    if (!instruction || !activeId) return;
+  const runCustomize = useCallback(async () => {
+    if (!captureId) return;
     try {
-      setBusy("패치 생성 중…");
-      setStepIdx(3);
-      const data = await api<{ analysis: LandingReferenceAnalysis; patch: { operations: unknown[] }; mode: string }>("/api/patch", {
-        method: "POST",
-        body: JSON.stringify({ runId: activeId, instruction }),
+      setBusy("커스터마이징 적용 + 디자인 유지 검증 중…");
+      const editList = Object.entries(edits)
+        .filter(([, v]) => v.trim().length > 0)
+        .map(([id, value]) => {
+          const f = fields.find((x) => x.id === id);
+          return { id, kind: (f?.kind ?? f?.type ?? "text") as string, value };
+        });
+      const data = await api<{ customizedHtmlWebPath: string; retention: DesignRetentionResult }>("/api/clone-customize", {
+        captureId,
+        edits: editList,
       });
-      setAnalysis(data.analysis);
-      setComposer("");
-      setDirty(false);
-      addLog(`패치 적용 (${data.mode}) — ${data.patch.operations.length}개 연산`);
-      void openRun(activeId);
+      setRetention(data.retention);
+      setStage("customize");
+      addLog(`커스터마이징 ${data.retention.passed ? "유지 통과 ✓" : "유지 실패 ✗"} — component ${pct(data.retention.componentRetention)}`);
     } catch (e) {
-      addLog(`패치 실패: ${(e as Error).message}`);
+      addLog(`커스터마이징 실패: ${(e as Error).message}`);
     } finally {
       setBusy(null);
     }
-  }, [composer, activeId, addLog, openRun]);
+  }, [captureId, edits, fields, addLog]);
 
-  // UI 컨트롤 직접 편집 저장 → PUT
-  const saveAnalysis = useCallback(async () => {
-    if (!activeId || !analysis) return;
-    try {
-      setBusy("저장 중…");
-      const data = await api<{ analysis: LandingReferenceAnalysis }>(`/api/runs/${activeId}`, {
-        method: "PUT",
-        body: JSON.stringify({ analysis }),
-      });
-      setAnalysis(data.analysis);
-      setDirty(false);
-      addLog("변경 저장됨 (customization 버전 +1)");
-      void loadRuns();
-    } catch (e) {
-      addLog(`저장 실패: ${(e as Error).message}`);
-    } finally {
-      setBusy(null);
-    }
-  }, [activeId, analysis, addLog, loadRuns]);
-
-  // Make → generate
-  const runGenerate = useCallback(async () => {
-    if (!activeId) return;
-    try {
-      setBusy("랜딩 생성 중…");
-      setStepIdx(4);
-      const data = await api<{ previewUrl: string; codePath: string }>("/api/generate", {
-        method: "POST",
-        body: JSON.stringify({ runId: activeId }),
-      });
-      setGenerated(data);
-      addLog(`생성 완료 → ${data.previewUrl} (코드: ${data.codePath})`);
-      void loadRuns();
-    } catch (e) {
-      addLog(`생성 실패: ${(e as Error).message}`);
-    } finally {
-      setBusy(null);
-    }
-  }, [activeId, addLog, loadRuns]);
-
-  // ── 로컬 섹션 편집 (Controls 탭) ──
-  const mutateSection = useCallback((idx: number, fn: (s: SectionSpec) => SectionSpec) => {
-    setAnalysis((prev) => {
-      if (!prev) return prev;
-      const sections = prev.structure.sections.map((s, i) => (i === idx ? fn(s) : s));
-      return { ...prev, structure: { ...prev.structure, sections } };
-    });
-    setDirty(true);
-  }, []);
-
-  const moveSection = useCallback((idx: number, dir: -1 | 1) => {
-    setAnalysis((prev) => {
-      if (!prev) return prev;
-      const arr = [...prev.structure.sections];
-      const j = idx + dir;
-      if (j < 0 || j >= arr.length) return prev;
-      [arr[idx], arr[j]] = [arr[j], arr[idx]];
-      const reordered = arr.map((s, i) => ({ ...s, order: i }));
-      return { ...prev, structure: { ...prev.structure, sections: reordered } };
-    });
-    setDirty(true);
-  }, []);
+  const STAGES: { key: Stage; label: string }[] = [
+    { key: "input", label: "1. 입력" },
+    { key: "clone", label: "2. Capture & Clone" },
+    { key: "analyze", label: "3. Analyze" },
+    { key: "customize", label: "4. Customize & Generate" },
+  ];
+  const stageIdx = STAGES.findIndex((s) => s.key === stage);
+  const guardPassed = verification?.overallPassed ?? false;
+  const ts = (analysis?.designTokens ?? analysis?.["design-tokens"]) as
+    | { colors?: { palette?: string[] }; typography?: { fontFamilies?: string[] } }
+    | undefined;
 
   return (
-    <div className="shell">
+    <div className="shell" style={{ gridTemplateColumns: "300px minmax(0,1fr) 480px" }}>
       <div className="topbar">
-        <div className="brand">Landing Page from Reference</div>
-        <div style={{ display: "flex", gap: "0.6rem", alignItems: "center" }}>
-          {busy && <span className="muted" style={{ fontSize: "0.8rem" }}>{busy}</span>}
-          <span className="pill">{process.env.NEXT_PUBLIC_MODE ?? "auto"}</span>
+        <div className="brand">Landing Page from Reference — Clone</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {busy && <span className="muted" style={{ fontSize: 12 }}>{busy}</span>}
+          {verification && (
+            <span className="pill" style={{ borderColor: guardPassed ? "var(--ok)" : "var(--err)", color: guardPassed ? "var(--ok)" : "var(--err)" }}>
+              Guardrail {guardPassed ? "PASS ≥90%" : "FAIL <90%"}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* History sidebar */}
+      {/* Left: 파이프라인 + 입력 */}
       <aside className="sidebar">
-        <button className="btn btn-primary btn-block" onClick={newRunForm}>
-          + 새 분석
-        </button>
-        <div className="sidebar-title">History</div>
-        {runs.length === 0 && <div className="muted" style={{ fontSize: "0.82rem", padding: "0.4rem" }}>아직 run 이 없습니다.</div>}
-        {runs.map((r) => (
-          <button key={r.id} className={`run-item${r.id === activeId ? " active" : ""}`} onClick={() => void openRun(r.id)}>
-            <div className="run-url">{r.referenceUrl}</div>
-            <div className="run-meta">
-              {r.status} · {r.userGoal || "—"} · v{r.customizationVersion}
-            </div>
-          </button>
+        <div className="sidebar-title">파이프라인</div>
+        {STAGES.map((s, i) => (
+          <div key={s.key} className={`run-item${i === stageIdx ? " active" : ""}`} style={{ cursor: "default" }}>
+            <div className="run-url">{s.label}</div>
+            <div className="run-meta">{i < stageIdx ? "완료" : i === stageIdx ? "진행" : "대기"}</div>
+          </div>
         ))}
+        <div className="sidebar-title" style={{ marginTop: 16 }}>Reference URL</div>
+        <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com 또는 /fixture/index.html" />
+        <button className="btn btn-primary btn-block" style={{ marginTop: 10 }} onClick={() => void runClone()} disabled={!!busy}>
+          Capture & Clone
+        </button>
+        <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+          실제 브라우저 렌더 결과를 캡처하고 에셋을 mirror 해 로컬 clone 을 만든 뒤 ≥90% 일치를 강제합니다.
+        </p>
+        {log.length > 0 && <div className="log" style={{ marginTop: 12 }}>{log.join("\n")}</div>}
       </aside>
 
-      {/* Main workspace */}
+      {/* Center: 스크린샷 + 비교 */}
       <main className="workspace">
-        <div className="steps">
-          {STEPS.map((label, i) => (
-            <span key={label} className={`step${i === stepIdx ? " active" : i < stepIdx ? " done" : ""}`}>
-              {i + 1}. {label}
-            </span>
-          ))}
-        </div>
-
-        {!analysis && (
-          <div className="card" style={{ maxWidth: 640 }}>
-            <h2 style={{ marginTop: 0 }}>레퍼런스 입력</h2>
-            <p className="muted" style={{ marginTop: "-0.4rem" }}>
-              URL 의 구조·시각 리듬을 분석해 JSON 으로 만든 뒤 커스터마이징합니다. (원본 자산은 복사하지 않습니다)
+        {!verification && (
+          <div className="card" style={{ maxWidth: 560 }}>
+            <h2 style={{ marginTop: 0 }}>Reference 입력 후 Capture &amp; Clone</h2>
+            <p className="muted">
+              좌측에서 URL 을 넣고 실행하세요. 기본값은 통제 fixture(<code>/fixture/index.html</code>)입니다.
             </p>
-            <div className="field">
-              <label className="label">레퍼런스 URL</label>
-              <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" />
-            </div>
-            <div className="field">
-              <label className="label">목적 / 브랜드</label>
-              <input className="input" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="예: AI 강의 랜딩, SaaS 랜딩" />
-            </div>
-            <button className="btn btn-primary" onClick={() => void runAnalyze()} disabled={!!busy}>
-              {busy ? "진행 중…" : "분석 시작"}
-            </button>
           </div>
         )}
 
-        {analysis && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            <div className="card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.6rem" }}>
-                <div>
-                  <div style={{ fontWeight: 700 }}>{activeRun?.referenceUrl}</div>
-                  <div className="muted" style={{ fontSize: "0.82rem" }}>
-                    섹션 {analysis.structure.sections.length}개 · mood {analysis.designSystem.visualStyle.mood.join(", ")} · {activeRun?.status}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <button className="btn" onClick={() => void runGenerate()} disabled={!!busy}>
-                    Make (생성)
-                  </button>
-                  {generated && (
-                    <a className="btn" href={generated.previewUrl} target="_blank" rel="noreferrer">
-                      새 탭에서 열기 ↗
-                    </a>
-                  )}
-                </div>
-              </div>
+        {verification && captureId && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "flex", gap: 12 }}>
+              <ScoreTable label="Desktop 1440×900" s={verification.desktop} />
+              <ScoreTable label="Mobile 390×844" s={verification.mobile} />
             </div>
 
-            {generated && (
-              <div className="card">
-                <div className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.5rem" }}>
-                  생성된 랜딩 (영속 프리뷰) · 코드 스냅샷: <code>{generated.codePath}</code>
-                </div>
-                <iframe className="preview-frame" src={generated.previewUrl} title="generated-preview" />
+            <div className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <strong>원본 vs Clone (desktop)</strong>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  섹션차 {verification.sectionCountDiff} · 폰트 {pct(verification.fontSimilarity)}
+                </span>
               </div>
-            )}
-
-            {history.length > 0 && (
-              <div className="card">
-                <div className="sidebar-title" style={{ margin: "0 0 0.5rem" }}>작업 기록</div>
-                {history.map((h) => (
-                  <div key={h.id} className="muted" style={{ fontSize: "0.8rem" }}>
-                    · {h.kind} — {new Date(h.createdAt).toLocaleString("ko-KR")}
-                  </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                {(["original", "clone", "diff"] as const).map((k) => (
+                  <figure key={k} style={{ margin: 0 }}>
+                    <img src={`/captures/${captureId}/${k}-desktop.png`} alt={k} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 8, background: "#fff" }} />
+                    <figcaption className="muted" style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}>{k}</figcaption>
+                  </figure>
                 ))}
               </div>
-            )}
-          </div>
-        )}
+            </div>
 
-        {log.length > 0 && (
-          <div style={{ marginTop: "1rem" }}>
-            <div className="sidebar-title" style={{ margin: "0 0 0.4rem" }}>로그</div>
-            <div className="log">{log.join("\n")}</div>
+            {!guardPassed && verification.failureReasons.length > 0 && (
+              <div className="card" style={{ borderColor: "var(--err)" }}>
+                <strong style={{ color: "var(--err)" }}>가드레일 실패 — 분석 차단 (GOAL §3)</strong>
+                <ul className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+                  {verification.failureReasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {guardPassed && (
+              <div className="card">
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn-primary" onClick={() => void runAnalyze()} disabled={!!busy}>분석 (Loop E)</button>
+                  <a className="btn" href={`/captures/${captureId}/clone.html`} target="_blank" rel="noreferrer">Clone 새 탭 ↗</a>
+                  {retention && <a className="btn" href={`/customizations/${captureId}/customized-page.html`} target="_blank" rel="noreferrer">Customized 새 탭 ↗</a>}
+                </div>
+              </div>
+            )}
+
+            {retention && (
+              <div className="card">
+                <strong>디자인 유지 검증 (Loop G) — {retention.passed ? "통과 ✓" : "실패 ✗"}</strong>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 10, fontSize: 13 }}>
+                  {([["token", retention.designTokenRetention], ["layout", retention.layoutRetention], ["typography", retention.typographyRetention], ["spacing", retention.spacingRetention], ["color", retention.colorRetention], ["component", retention.componentRetention]] as const).map(([k, v]) => (
+                    <div key={k} className="muted">{k}: <b style={{ color: "var(--text)" }}>{pct(v)}</b></div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
 
-      {/* Inspector */}
+      {/* Right: 분석 + 커스터마이징 */}
       <aside className="inspector">
-        <div className="tabs">
-          {(["preview", "json", "controls"] as Tab[]).map((t) => (
-            <button key={t} className={`tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
-              {t === "preview" ? "실시간 프리뷰" : t === "json" ? "JSON" : "컨트롤"}
-            </button>
-          ))}
-        </div>
+        <div className="tabs"><div className="tab active">분석 &amp; 커스터마이징</div></div>
         <div className="inspector-body">
-          {!analysis && <div className="muted" style={{ fontSize: "0.85rem" }}>분석 결과가 여기에 표시됩니다.</div>}
+          {!analysis && <div className="muted" style={{ fontSize: 13 }}>가드레일 통과 후 분석하면 구조·디자인 토큰·편집 필드가 여기 표시됩니다.</div>}
 
-          {analysis && tab === "preview" && (
-            <div className="live-preview">
-              <LandingRenderer analysis={analysis} />
-            </div>
-          )}
-
-          {analysis && tab === "json" && <pre className="json">{JSON.stringify(analysis, null, 2)}</pre>}
-
-          {analysis && tab === "controls" && (
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
-                <span className="muted" style={{ fontSize: "0.8rem" }}>섹션 {analysis.structure.sections.length}개</span>
-                <button className="btn btn-primary" onClick={() => void saveAnalysis()} disabled={!dirty || !!busy}>
-                  {dirty ? "변경 저장" : "저장됨"}
-                </button>
-              </div>
-              {analysis.structure.sections.map((s, idx) => (
-                <div key={s.id} style={{ marginBottom: "0.8rem", border: "1px solid var(--border)", borderRadius: "0.55rem", padding: "0.6rem", background: "var(--bg)" }}>
-                  <div className="sec-row" style={{ border: "none", padding: 0, marginBottom: "0.5rem", background: "transparent" }}>
-                    <input type="checkbox" checked={s.enabled} onChange={(e) => mutateSection(idx, (x) => ({ ...x, enabled: e.target.checked }))} />
-                    <span style={{ fontWeight: 600, fontSize: "0.85rem" }}>
-                      {s.label} <span className="pill">{s.type}</span>
-                    </span>
-                    <button className="btn" style={{ padding: "0.2rem 0.45rem" }} onClick={() => moveSection(idx, -1)}>↑</button>
-                    <button className="btn" style={{ padding: "0.2rem 0.45rem" }} onClick={() => moveSection(idx, 1)}>↓</button>
-                  </div>
-                  <input
-                    className="input"
-                    style={{ marginBottom: "0.4rem" }}
-                    placeholder="headline"
-                    value={s.content.headline ?? ""}
-                    onChange={(e) => mutateSection(idx, (x) => ({ ...x, content: { ...x.content, headline: e.target.value || null } }))}
-                  />
-                  <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
-                    <span className="muted" style={{ fontSize: "0.75rem" }}>배경</span>
-                    <input
-                      type="color"
-                      value={/^#[0-9a-fA-F]{6}$/.test(s.style.background) ? s.style.background : "#0b0b0f"}
-                      onChange={(e) => mutateSection(idx, (x) => ({ ...x, style: { ...x.style, background: e.target.value } }))}
-                      style={{ width: 38, height: 28, background: "transparent", border: "1px solid var(--border)", borderRadius: 6 }}
-                    />
-                    <input
-                      className="input"
-                      style={{ flex: 1 }}
-                      value={s.style.background}
-                      onChange={(e) => mutateSection(idx, (x) => ({ ...x, style: { ...x.style, background: e.target.value } }))}
-                    />
+          {analysis && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {ts?.colors?.palette && (
+                <div>
+                  <div className="sidebar-title" style={{ margin: "0 0 6px" }}>팔레트</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {ts.colors.palette.slice(0, 12).map((c, i) => (
+                      <span key={i} title={c} style={{ width: 22, height: 22, borderRadius: 5, background: c, border: "1px solid var(--border)" }} />
+                    ))}
                   </div>
                 </div>
+              )}
+              {ts?.typography?.fontFamilies && (
+                <div className="muted" style={{ fontSize: 12 }}>폰트: {ts.typography.fontFamilies.slice(0, 3).join(" / ")}</div>
+              )}
+
+              <div className="sidebar-title" style={{ margin: "4px 0 0" }}>콘텐츠 편집 (디자인 잠금 🔒)</div>
+              {fields.filter((f) => (f.kind ?? f.type) === "text" || (f.kind ?? f.type) === "cta").slice(0, 12).map((f) => (
+                <div key={f.id}>
+                  <label className="label">
+                    {f.id} <span className="pill">{f.kind ?? f.type}</span> {f.styleLocked && <span className="pill">style 🔒</span>}
+                  </label>
+                  <input className="input" value={edits[f.id] ?? ""} onChange={(e) => setEdits((m) => ({ ...m, [f.id]: e.target.value }))} />
+                </div>
               ))}
+              {fields.length === 0 && <div className="muted" style={{ fontSize: 12 }}>편집 가능한 텍스트 필드가 감지되지 않았습니다.</div>}
+
+              <button className="btn btn-primary" onClick={() => void runCustomize()} disabled={!!busy || fields.length === 0}>
+                적용 + 유지 검증 (Loop F/G)
+              </button>
+              <p className="muted" style={{ fontSize: 11 }}>
+                layout · typography · spacing · color · motion 은 잠금. 텍스트/CTA/이미지만 변경되며, 변경 후 디자인 유지를 텍스트 마스킹 비교로 검증합니다.
+              </p>
             </div>
           )}
         </div>
       </aside>
-
-      {/* Bottom composer */}
-      <div className="composer">
-        <textarea
-          className="textarea"
-          rows={1}
-          placeholder={activeId ? "이 섹션을 더 애플처럼 바꿔줘 / 전체를 다크모드로 / 히어로를 더 강렬하게…" : "먼저 분석을 실행하세요"}
-          value={composer}
-          onChange={(e) => setComposer(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void sendComposer();
-          }}
-          disabled={!activeId || !!busy}
-        />
-        <button className="btn btn-primary" onClick={() => void sendComposer()} disabled={!activeId || !composer.trim() || !!busy}>
-          보내기
-        </button>
-      </div>
     </div>
   );
 }
