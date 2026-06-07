@@ -1,29 +1,36 @@
-# PROMPT — Landing Page from Reference (Ralph Loop)
+# PROMPT — Landing Page from Reference · clone-first Ralph Loop
 
-너는 이 저장소에서 **손 안 대고(hands-off) 개발을 이어가는 자율 에이전트**다.
-매 반복마다 같은 프롬프트를 받지만, 파일과 git 히스토리에 남은 네 이전 작업을 보고 이어서 개선한다.
+너는 손 안 대고 개발을 이어가는 자율 에이전트다. 성공 기준은 **Reference 렌더 결과와 Clone ≥90% 일치**.
+재해석은 실패다.
 
-## 매 반복 절차
-1. `GOAL.md` 와 `PROGRESS.md` 를 읽어 현재 상태와 **다음 미완료 단계 하나**를 파악한다.
-2. `CLAUDE.md` 의 Context Loading Protocol 에 따라 필요한 파일만 읽는다.
-3. 그 단계를 **작고 검증 가능하게** 구현한다.
-4. `bash harness/verify.sh` 로 검증한다 (schema → typecheck → build).
-   - 실패 시 추측하지 말고 에러 로그로 근본원인을 추적해 고친다 (systematic-debugging).
-5. 통과하면 `PROGRESS.md` 항목을 `[x]` 로 갱신하고 **커밋**한다.
-6. UI/렌더가 바뀌었으면 `screenshots/` 에 스크린샷을 저장한다.
+## 매 반복 절차 (PLAN→IMPLEMENT→RUN→VERIFY→DIAGNOSE→PATCH→RE-RUN)
+1. `GOAL.md`(v2) + `CLONE_SPEC.md` + `PROGRESS.md` 를 읽어 다음 미완료 Loop 를 파악한다.
+2. 그 Loop 하나를 작게 구현한다.
+3. 실제로 **실행**한다: 캡처/클론/검증 또는 해당 테스트.
+4. 측정한다: `verification.json`(≥90%) 또는 test 종료코드.
+5. 실패면 추측 말고 `CLONE_SPEC §5` 진단표로 원인 추적 후 수정, 재실행.
+6. 통과하면 `PROGRESS.md` 갱신 + 커밋. 스크린샷/ diff 는 산출물로 저장.
 
-## 제약 (GOAL.md Iron Laws — 절대 위반 금지)
-- **단일 Node 프로세스**: `node:sqlite` + `playwright`(Node) + Next.js Route Handler. Python 런타임 금지.
-- **스키마가 SSOT**: `schemas/*.schema.json`. 타입은 `lib/schema.ts` 에서만 import.
-- **조기 정지 금지**: 외부 의존(LLM/네트워크/브라우저) 실패 시 `lib/mock.ts` 폴백으로 끝까지 진행.
-- **데이터 파괴 금지**: 사용자 JSON 은 patch + version 으로만 변경.
-- **자산 미복사**: 원본 이미지/문구/로고 복사 금지. structure/style 만 재해석.
+## Loops
+```
+A 캡처(playwright, desktop+mobile, 전체 대기/오토스크롤/안정성)
+B 에셋 mirror + URL rewrite
+C clone.html 생성 + 서빙
+D 원본↔clone 시각 검증 ≥90% (pixelmatch+SSIM+histogram+layout)  ← 통과 전 분석 금지
+E clone 아티팩트 분석(structure/tokens/sections/schema)
+F 콘텐츠 전용 커스터마이징(디자인 잠금)
+G 디자인 유지 검증(텍스트 마스킹)
+H 전체 E2E + lint/typecheck/test/e2e/visual
+```
+
+## 제약 (Iron Laws)
+- 리플레이 강제(렌더 DOM + 에셋 mirror). LLM 재그리기 금지.
+- clone 미통과(<90%) 시 분석 금지.
+- 분석은 clone 아티팩트만. 커스터마이징은 콘텐츠 전용.
+- 측정 안 한 수치 보고 금지. 90% 미만 완료 금지.
 
 ## 완료 (유일한 종료 조건)
-`GOAL.md` 의 완료 조건 7개가 **전부** 참이고 `bash harness/verify.sh` 가 **exit 0** 이면:
-1. `.harness/state/ONESHOT_COMPLETE` 파일을 만든다.
-2. 마지막 줄에 **정확히** 다음을 출력한다:
-
-<promise>ONESHOT COMPLETE</promise>
-
-그 전에는 완료를 선언하지 말고, 다음 미완료 단계를 계속 진행하라.
+`GOAL.md` DoD 13 술어 전부 측정으로 참 + fixture 시각 유사도 ≥90% 일 때만:
+1. `.harness/state/ONESHOT_COMPLETE` 생성
+2. 마지막 줄에 정확히: <promise>CLONE COMPLETE</promise>
+그 전에는 다음 Loop 를 계속 진행하라.

@@ -1,84 +1,99 @@
-# GOAL.md — 북극성 미션 (표류 방지 앵커)
+# GOAL.md — Clone-First 미션 (표류 방지 앵커) · v2
 
-> 이 파일은 하네스의 **벽 1**이다. SessionStart 훅이 매 세션·재개·컨텍스트 압축 시점마다
-> 이 요약을 재주입한다. 에이전트는 이 목표를 절대 잊지 않는다.
+> ⚠️ 미션 전환(v1 → v2): 기존 "자산 미복사·재해석"은 **폐기**한다.
+> 이제 성공 기준은 **예쁜 랜딩 생성이 아니라, Reference URL 의 실제 브라우저 렌더 결과와
+> Clone Preview 가 ≥90% 시각적으로 일치하는 것**이다. 디자인 재해석은 **실패**로 간주한다.
 
 ## 한 줄 정의
 
-레퍼런스 URL을 입력하면 디자인 구조를 분석해 JSON으로 구조화하고, 사용자가 자연어·UI로
-커스터마이징한 뒤 새 랜딩페이지를 **생성·저장·재수정**할 수 있는 LLM 기반 랜딩 제작 도구.
+Reference URL 을 실제 브라우저로 렌더링한 결과물을 기준으로 **로컬 Clone 을 먼저 만들고,
+그 Clone 이 원본과 최소 90% 시각적으로 일치한 뒤에만** 분석/커스터마이징/최종 생성으로 넘어간다.
+
+핵심 흐름:
+```
+Reference URL → Browser-Rendered Clone → Strict Visual Verification(≥90%)
+  → Clone-based Analysis → Locked-Design Customization → Verified Final Generation
+```
 
 ---
 
-## 절대 규칙 (틀리면 안 되는 사실 — Iron Laws)
+## 절대 규칙 (Iron Laws — 위반 시 실패)
 
-1. **단일 프로세스.** 전체 시스템은 **Node/TypeScript 단일 Next.js 프로세스**로 동작한다.
-   별도 Python 런타임/FastAPI/Redis/Postgres를 띄우지 않는다. (doing.md "최대한 단일 프로세스")
-   - DB는 **`node:sqlite` 내장 모듈** (네이티브 빌드 없음). better-sqlite3 금지.
-   - 브라우저 캡처는 **`playwright` (Node)**. Python Playwright 아님.
-   - "에이전트"는 **`lib/agents/*.ts` 모듈**이다. 별도 프로세스가 아니다.
+1. **리플레이(replay)지 재구성(reconstruct)이 아니다.** Reference 의 *렌더된 DOM* + 모든 CSS/웹폰트/이미지/배경
+   asset 을 **mirror 하고 URL 을 로컬로 rewrite** 하여 clone 을 만든다. clone 은 원본의 렌더 결과물을
+   로컬로 재배치한 것 그 자체다.
+   - ❌ HTML 소스만 파싱(Cheerio) · ❌ LLM 이 디자인 추측 재생성 · ❌ 텍스트만 추출해 새 Tailwind 재구성.
 
-2. **스키마는 단일 진실원천(SSOT).** `schemas/analysis.schema.json`,
-   `schemas/patch.schema.json` 이 유일한 데이터 계약이다.
-   - `lib/schema.ts` 의 TS 타입은 이 스키마와 **반드시 일치**해야 한다.
-   - LLM 출력은 **OpenAI Structured Outputs(strict)** 로 이 스키마에 고정한다.
-   - 타입을 다른 곳에서 재정의하지 않는다. 스키마를 깨는 변경은 금지.
+2. **캡처는 Playwright(Chromium).** desktop `1440x900` + mobile `390x844`.
+   대기: `domcontentloaded` → `load` → `networkidle` → `document.fonts.ready` → 전체 오토스크롤(lazy 로딩)
+   → 상단 복귀 → 레이아웃 안정성 2회 검사. cookie/modal 가리면 닫고, 못 닫으면 metadata 기록.
 
-3. **자산 미복사.** 원본 사이트의 이미지·문구·로고·브랜드 자산을 **그대로 복사하지 않는다.**
-   레이아웃 구조·섹션 구성·시각 리듬·디자인 토큰만 **재해석**한다.
+3. **Clone Verification Guardrail 이 진행을 차단한다.** 아래를 *모두* 만족해야 분석 단계로 간다:
+   ```
+   desktop visual similarity ≥ 0.90
+   mobile  visual similarity ≥ 0.90
+   major section count diff   ≤ 1
+   primary palette overlap    ≥ 0.85
+   font style similarity      ≥ 0.80
+   layout bbox similarity     ≥ 0.85
+   ```
+   similarity 는 **최소 2개 지표 조합**(pixelmatch + SSIM + color histogram + layout bbox + OCR/text-block).
+   단일 pixel diff 금지(AA/폰트 오탐). 실패 → Ralph 루프(≤8회) → 실패 시 `failure-report.md`. **clone 미통과 시 분석 금지.**
 
-4. **데이터 파괴 금지.** 사용자 JSON은 **덮어쓰지 않고** patch + versioning 으로만 바꾼다.
-   `runs/`·`schemas/`·`GOAL.md` 를 파괴적으로 다루지 않는다. (가드레일: PreToolUse 훅)
+4. **분석은 Clone 아티팩트 기준.** `rendered-dom.html`, `computed-styles.json`, `layout-map.json`,
+   `design-tokens.raw.json`, 원본/clone screenshot, `network.har`, mirrored assets 만 사용. **원본 텍스트 재크롤 금지.**
 
-5. **조기 정지 금지 (fallback).** "정보 부족"으로 멈추지 않는다. 외부 의존(네트워크/LLM/브라우저)이
-   실패하면 **결정적 mock 으로 폴백**해 파이프라인을 끝까지 흘려보낸다. (`lib/mock.ts`)
-   - `OPENAI_API_KEY` 가 없으면 자동으로 mock 모드. 앱은 키 없이도 end-to-end 동작해야 한다.
+5. **커스터마이징은 콘텐츠 전용.** 텍스트/CTA/이미지/브랜드/섹션순서일부/accent일부/블록on-off 만 수정.
+   **잠금**: layout · typography scale · spacing · grid/flex · animation timing · section rhythm · design language.
+   커스터마이징 후 **디자인 유지 검증**(token/layout/typography/spacing/color/component retention, 텍스트 영역 마스킹).
 
-6. **검증은 비용 순서.** 싼 검증 먼저: schema → typecheck → build → (마지막) browser preview.
-   브라우저 검증을 1순위로 쓰지 않는다. (예산 소진 방지)
+6. **최종 생성은 Clone 에서 출발.** 새 Tailwind/shadcn 템플릿 재디자인 금지. clone HTML/CSS 구조 유지 + 사용자 수정 반영.
 
-7. **기능마다 커밋.** 의미 있는 단위마다 Git commit. (doing.md)
+7. **검증 전 완료 선언 금지.** `lint`/`typecheck`/`test`/`test:e2e`/`test:visual` 을 **실제 실행**한다.
+   측정하지 않은 수치를 말하지 않는다. **90% 미만이면 완료가 아니다.**
 
-8. **화면마다 스크린샷.** UI가 구현될 때마다 `screenshots/` 에 저장한다. (doing.md)
+8. **Fixture = 결정적 DoD 앵커.** `tests/fixtures/reference-site/` (내가 통제) 는 clone ≥90% 가 **반드시** 나와야 한다.
+   임의의 실사이트는 best-effort — CSP/CORS/anti-bot/웹폰트로 90% 미달 가능 → 정직하게 `failure-report.md`.
 
----
+9. **단일 Node 프로세스 유지** (node:sqlite + playwright + Next). 기능/루프마다 커밋. 기존 코드는 필요시 전면 재구성.
 
-## 정식 해석 결정 (이 프로젝트의 canonical choice — 표류 방지용 고정)
-
-README가 두 갈래를 허용하는 지점은 아래로 **고정**한다. 루프는 이를 재논의하지 않는다.
-
-| 선택지 | 고정 결정 | 근거 |
-|---|---|---|
-| Backend: Python or Route Handler | **Next.js Route Handler** | Iron Law 1 (단일 프로세스) |
-| Code Gen: 파일 생성+빌드 vs 런타임 렌더 | **데이터 기반 런타임 렌더 (주) + 코드 스냅샷 저장 (부)** | 런타임 빌드는 느리고 깨지기 쉬움(예산 소진). `/preview/[id]` 가 최종 JSON을 React로 렌더. `/api/generate` 가 `page.tsx` 소스 문자열을 산출물로 저장. |
-| DB | **`node:sqlite`** | Node 26 내장, 의존성 0 |
-| LLM | **OpenAI Structured Outputs (strict)** + mock fallback | 스키마 고정 |
-
----
-
-## 완료 조건 (Definition of Done — 검사 가능한 술어)
-
-아래가 **모두** 참일 때만 `<promise>ONESHOT COMPLETE</promise>` 를 출력하고
-`.harness/state/ONESHOT_COMPLETE` 센티넬을 만든다.
-
-1. `bash harness/verify.sh` 가 exit 0 (schema → typecheck → build 전부 통과).
-2. URL 입력 → 캡처 → 분석 JSON → UI 편집 → 자연어 patch → 코드 생성 → preview → history
-   end-to-end 가 동작한다 (mock 모드에서도).
-3. 분석/패치 JSON 이 `schemas/*.schema.json` 검증을 통과한다.
-4. `/preview/[runId]` 가 최종 JSON 으로 랜딩을 렌더한다.
-5. History 에서 과거 run 을 다시 불러와 재커스터마이징할 수 있다.
-6. `screenshots/` 에 메인 UI + 생성된 랜딩 preview 스크린샷이 있다.
-7. 모든 작업이 커밋되어 `git status` clean.
+10. **각 서브시스템을 Ralph 루프로**: `PLAN → IMPLEMENT → RUN → VERIFY → DIAGNOSE → PATCH → RE-RUN → EXIT(가드레일 통과 시에만)`.
+    Loop A 캡처 · B 에셋 mirror · C clone 생성 · D 원본↔clone 검증 · E clone 분석 · F 커스터마이징 · G 유지검증 · H 전체 E2E.
 
 ---
 
-## 실패 모드 → 벽 (요약)
+## 완료 조건 (Definition of Done — 13 술어, 전부 측정으로 참)
+
+```
+[ ] 1. Reference URL 을 실제 브라우저 렌더링으로 캡처
+[ ] 2. JS/CSS/Font/Image 적용 결과 기준으로 DOM/CSSOM/Assets 수집
+[ ] 3. 로컬 Clone Preview 생성
+[ ] 4. Desktop 원본 vs Clone 시각 유사도 ≥ 90%
+[ ] 5. Mobile 원본 vs Clone 시각 유사도 ≥ 90%
+[ ] 6. 유사도 실패 시 분석 단계로 넘어가지 않음 (가드레일 차단 동작 증명)
+[ ] 7. 분석 JSON 이 Clone 결과물 기반으로 생성
+[ ] 8. 커스터마이징이 Clone 디자인 구조 유지한 채 콘텐츠만 수정
+[ ] 9. 커스터마이징 후 디자인 유지 검증 수행
+[ ] 10. 최종 랜딩이 원본 디자인 DNA 유지
+[ ] 11. Playwright E2E 테스트 존재
+[ ] 12. Visual Regression 테스트 존재
+[ ] 13. lint/typecheck/test/e2e/visual 통과
+```
+
+위가 **모두 측정으로 참**이고 fixture 에서 ≥90% 가 나올 때만
+`.harness/state/ONESHOT_COMPLETE` 생성 + `<promise>CLONE COMPLETE</promise>` 출력.
+그 전에는 Ralph 루프를 계속 돌린다. **검증 안 한 완료 선언 금지.**
+
+---
+
+## 실패 모드 → 벽
 
 | 실패 모드 | 벽 |
 |---|---|
-| 표류 | GOAL.md(이 파일) + 스키마 SSOT + SessionStart 훅 |
-| 조기 정지 | mock fallback + 부분 분석 허용 |
-| 데이터 파괴 | PreToolUse 훅 + patch/versioning |
-| 예산 소진 | 검증 사다리(싼 것 먼저) + 단계 캐싱 |
-| 저작권 | structure/style 재해석만, 원본 자산 금지 |
-| 렌더 불일치 | build + screenshot QA |
+| 재해석으로 표류 | 이 GOAL(리플레이 강제) + SessionStart 재주입 + CLONE_SPEC 계약 |
+| clone 미흡한데 진행 | Verification Guardrail(≥90%) 가 분석 차단 |
+| 과장 완료 | DoD 13 술어 + 실제 test 실행 + 측정 수치만 보고 |
+| 커스터마이징이 디자인 파괴 | retention 검증 + design lock |
+| 실사이트 불가능을 숨김 | failure-report.md 정직 보고 |
+| 예산 소진 | 검증 사다리: 정적/유사도(싼 것) → 브라우저(비쌈) |
+```
