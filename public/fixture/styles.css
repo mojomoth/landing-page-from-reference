@@ -1,0 +1,101 @@
+/* 통제 fixture 스타일 — 웹폰트/그라데이션/카드/유한 애니메이션/반응형 */
+@font-face {
+  font-family: "InterFx";
+  src: url("./assets/inter-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "InterFx";
+  src: url("./assets/inter-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  --bg: #0b1020;
+  --panel: #141a30;
+  --line: #1e2742;
+  --text: #e8ecf8;
+  --muted: #9aa3c0;
+  --accent: #6c8cff;
+  --accent2: #b06cff;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: "InterFx", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+.container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+a { color: inherit; }
+
+.nav {
+  position: sticky;
+  top: 0;
+  background: rgba(11, 16, 32, 0.82);
+  border-bottom: 1px solid var(--line);
+  z-index: 10;
+}
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; text-decoration: none; font-size: 18px; }
+.links { display: flex; gap: 24px; font-size: 14px; }
+.links a { color: var(--muted); text-decoration: none; }
+
+.hero {
+  background:
+    radial-gradient(1100px 480px at 72% -8%, rgba(108, 140, 255, 0.35), transparent 60%),
+    linear-gradient(180deg, #0b1020 0%, #0e1430 100%);
+  padding: 96px 0;
+  border-bottom: 1px solid var(--line);
+}
+.hero-inner { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 48px; align-items: center; }
+.hero-text { animation: rise 0.6s ease-out both; }
+.eyebrow { color: var(--accent); font-weight: 700; letter-spacing: 0.12em; font-size: 12px; margin: 0 0 12px; }
+.hero-title { font-size: 54px; font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; margin: 0 0 16px; }
+.hero-sub { color: var(--muted); font-size: 18px; max-width: 520px; margin: 0 0 28px; }
+.hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.hero-art img { width: 100%; height: auto; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4); display: block; animation: rise 0.7s 0.05s ease-out both; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+
+.btn { display: inline-block; padding: 14px 22px; border-radius: 12px; font-weight: 700; text-decoration: none; font-size: 15px; }
+.btn-primary { background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #fff; box-shadow: 0 10px 24px rgba(108, 140, 255, 0.35); }
+.btn-ghost { border: 1px solid var(--line); color: var(--text); }
+.btn-light { background: #fff; color: #0b1020; }
+
+.section-title { font-size: 32px; font-weight: 700; letter-spacing: -0.01em; text-align: center; margin: 0 0 36px; }
+.features, .showcase { padding: 88px 0; }
+.showcase { background: #0a0e1c; }
+
+.grid { display: grid; gap: 20px; }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+.card-ic { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--accent2)); margin-bottom: 14px; }
+.card h3 { margin: 0 0 6px; font-size: 18px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+.shot { margin: 0; }
+.shot img { width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line); display: block; }
+.shot figcaption { color: var(--muted); font-size: 14px; margin-top: 10px; text-align: center; }
+
+.cta { padding: 96px 0; background: radial-gradient(800px 360px at 50% 120%, rgba(176, 108, 255, 0.28), transparent 60%); }
+.cta-inner { text-align: center; }
+.cta h2 { font-size: 38px; font-weight: 700; margin: 0 0 10px; }
+.cta p { color: var(--muted); margin: 0 0 24px; }
+
+.footer { border-top: 1px solid var(--line); padding: 32px 0; color: var(--muted); font-size: 14px; text-align: center; }
+
+@media (max-width: 760px) {
+  .hero-inner { grid-template-columns: 1fr; }
+  .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  .hero-title { font-size: 36px; }
+  .section-title { font-size: 26px; }
+  .links { display: none; }
+}
