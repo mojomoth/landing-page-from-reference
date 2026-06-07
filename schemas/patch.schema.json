@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harness.local/patch.schema.json",
+  "title": "CustomizationPatch",
+  "description": "자연어 커스터마이징을 추적 가능한 연산으로 변환. path는 분석 객체 루트 기준 JSON Pointer. value는 JSON 인코딩 문자열(applier가 JSON.parse).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["target", "instruction", "operations"],
+  "properties": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sectionId", "path"],
+      "properties": {
+        "sectionId": { "type": ["string", "null"] },
+        "path": { "type": ["string", "null"] }
+      }
+    },
+    "instruction": { "type": "string" },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "path", "value", "reason"],
+        "properties": {
+          "op": { "type": "string", "enum": ["add", "replace", "remove"] },
+          "path": { "type": "string" },
+          "value": { "type": ["string", "null"] },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

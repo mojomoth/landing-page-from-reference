@@ -1,0 +1,31 @@
+# deps / build
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets
+.env
+.env.local
+.env*.local
+
+# database (runtime state — Git-as-DB는 PROGRESS.md/sentinel로, 바이너리 DB는 제외)
+db.sqlite
+db.sqlite-*
+
+# per-run runtime artifacts (capture/generated) — 구조만 유지
+runs/*/
+!runs/.gitkeep
+
+# ralph loop local state
+.claude/.ralph-loop.local.md
+.harness/state/
+
+# os / tooling
+.DS_Store
+playwright-report/
+test-results/
+
+# NOTE: screenshots/ 는 추적합니다 (화면 구현 피드백용 — doing.md)

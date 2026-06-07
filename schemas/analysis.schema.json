@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harness.local/analysis.schema.json",
+  "title": "LandingReferenceAnalysis",
+  "description": "레퍼런스 분석 결과의 단일 진실원천(SSOT). OpenAI Structured Outputs(strict) + ajv 공용.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "designSystem", "structure"],
+  "properties": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "capturedAt", "viewport"],
+      "properties": {
+        "url": { "type": "string" },
+        "capturedAt": { "type": "string" },
+        "viewport": { "type": "string", "enum": ["desktop", "tablet", "mobile"] }
+      }
+    },
+    "designSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["colors", "typography", "spacing", "visualStyle"],
+      "properties": {
+        "colors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["background", "text", "accent", "border"],
+          "properties": {
+            "background": { "type": "array", "items": { "type": "string" } },
+            "text": { "type": "array", "items": { "type": "string" } },
+            "accent": { "type": "array", "items": { "type": "string" } },
+            "border": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "typography": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fontFamilies", "headingScale", "bodyScale"],
+          "properties": {
+            "fontFamilies": { "type": "array", "items": { "type": "string" } },
+            "headingScale": { "type": "array", "items": { "type": "string" } },
+            "bodyScale": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "spacing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sectionGap", "containerWidth", "paddingPattern"],
+          "properties": {
+            "sectionGap": { "type": "string" },
+            "containerWidth": { "type": "string" },
+            "paddingPattern": { "type": "string" }
+          }
+        },
+        "visualStyle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mood", "density", "radius", "shadow"],
+          "properties": {
+            "mood": { "type": "array", "items": { "type": "string" } },
+            "density": { "type": "string", "enum": ["compact", "balanced", "spacious"] },
+            "radius": { "type": "string", "enum": ["sharp", "soft", "round"] },
+            "shadow": { "type": "string", "enum": ["none", "subtle", "strong"] }
+          }
+        }
+      }
+    },
+    "structure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sections"],
+      "properties": {
+        "sections": { "type": "array", "items": { "$ref": "#/$defs/SectionSpec" } }
+      }
+    }
+  },
+  "$defs": {
+    "Cta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "href", "variant"],
+      "properties": {
+        "label": { "type": "string" },
+        "href": { "type": "string" },
+        "variant": { "type": "string", "enum": ["primary", "secondary", "ghost"] }
+      }
+    },
+    "SectionItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "body", "value", "href"],
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "body": { "type": ["string", "null"] },
+        "value": { "type": ["string", "null"] },
+        "href": { "type": ["string", "null"] }
+      }
+    },
+    "SectionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "order", "enabled", "layout", "content", "style"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["header", "hero", "feature", "cards", "testimonial", "pricing", "faq", "footer", "custom"]
+        },
+        "label": { "type": "string" },
+        "order": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "maxWidth", "spacing"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["centered", "split", "grid", "asymmetric", "stacked"] },
+            "maxWidth": { "type": "string" },
+            "spacing": { "type": "string" }
+          }
+        },
+        "content": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eyebrow", "headline", "body", "ctas", "items"],
+          "properties": {
+            "eyebrow": { "type": ["string", "null"] },
+            "headline": { "type": ["string", "null"] },
+            "body": { "type": ["string", "null"] },
+            "ctas": { "type": "array", "items": { "$ref": "#/$defs/Cta" } },
+            "items": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } }
+          }
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["background", "textColor", "accentColor", "radius"],
+          "properties": {
+            "background": { "type": "string" },
+            "textColor": { "type": "string" },
+            "accentColor": { "type": ["string", "null"] },
+            "radius": { "type": ["string", "null"] }
+          }
+        }
+      }
+    }
+  }
+}
