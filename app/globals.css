@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   --bg: #0b0b0f;
   --panel: #14141b;
   --panel-2: #1b1b24;
@@ -9,12 +9,14 @@
   --text: #e7e7ee;
   --muted: #9a9aab;
   --accent: #6366f1;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --err: #ef4444;
 }
 
 * {
   box-sizing: border-box;
 }
-
 html,
 body {
   padding: 0;
@@ -22,4 +24,272 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
-/* 생성된 랜딩 preview 는 자체 색을 인라인 스타일로 주입하므로 전역 영향 최소화 */
+/* ───────── 앱 크롬 (생성된 랜딩 프리뷰는 자체 인라인 스타일을 쓰므로 영향 없음) ───────── */
+.shell {
+  display: grid;
+  height: 100vh;
+  overflow: hidden;
+  grid-template-columns: 264px minmax(0, 1fr) 460px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top  top   top"
+    "side main  insp"
+    "side comp  insp";
+  background: var(--bg);
+  color: var(--text);
+}
+.topbar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.brand {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.sidebar {
+  grid-area: side;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding: 0.75rem;
+}
+.workspace {
+  grid-area: main;
+  overflow: auto;
+  padding: 1.25rem;
+}
+.inspector {
+  grid-area: insp;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+.composer {
+  grid-area: comp;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 0.75rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.12s;
+}
+.btn:hover {
+  border-color: var(--accent);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-block {
+  width: 100%;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.textarea {
+  resize: vertical;
+  min-height: 44px;
+}
+.label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 0.3rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.field {
+  margin-bottom: 0.85rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1.1rem;
+}
+.sidebar-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0.6rem 0.3rem;
+  font-weight: 700;
+}
+.run-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.6rem;
+  color: var(--text);
+  cursor: pointer;
+  margin-bottom: 0.25rem;
+}
+.run-item:hover {
+  background: var(--panel-2);
+}
+.run-item.active {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.run-url {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+}
+
+.steps {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.1rem;
+}
+.step {
+  font-size: 0.74rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.step.active {
+  border-color: var(--accent);
+  color: #fff;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.step.done {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.inspector-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0.85rem;
+}
+
+.json {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c9d1ff;
+}
+.log {
+  font-family: ui-monospace, monospace;
+  font-size: 0.76rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.6rem;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.sec-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: var(--bg);
+}
+.pill {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.preview-frame {
+  width: 100%;
+  height: 460px;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: #fff;
+}
+.live-preview {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  overflow: hidden;
+  background: #fff;
+  color: #111;
+}
